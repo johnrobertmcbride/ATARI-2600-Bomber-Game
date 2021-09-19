@@ -16,6 +16,25 @@ JetXPos         byte         ; player0 x-position
 JetYPos         byte         ; player0 y-position
 BomberXPos      byte         ; player1 x-position
 BomberYPos      byte         ; player1 y-position
+JetSpritePtr    word         ; pointer to player0 sprite lookup table
+JetColorPtr     word         ; pointer to player0 color lookup table
+BomberSpritePtr word         ; pointer to player1 sprite lookup table
+BomberColorPtr  word         ; pointer to player1 color lookup table
+
+;; Notes
+;; Why is JetXPos a byte but JetSpritePtr a word?
+;; JetXPos stores the literal X position of the jet, this ranges from 0-192
+;; We only need 1 byte to store the data so we use the byte keyword to allocate 1 byte
+;; JetSpritePtr stores the memory address (which it "points" to) for the JetSprite.
+;; i.e. it doesn't store the value but a memory address for the value.
+;; As our ROM code starts at 0xF000 we need two bytes to reference the memory address
+;; So we use the "word" keyword which allocates 2 bytes
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Define constants
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+JET_HEIGHT = 9               ; player0 sprite height (# rows in lookup table)
+BOMBER_HEIGHT = 9            ; player1 sprite height (# rows in lookup table)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Start our ROM code at memory address $F000
@@ -33,6 +52,33 @@ Reset:
     sta JetYPos              ; JetYPos = 10
     lda #60
     sta JetXPos              ; JetXPos = 60
+    lda #83
+    sta BomberYPos           ; BomberYPos = 83
+    lda #54
+    sta BomberXPos           ; BomberXPos = 54
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Initialize pointers to the correct lookup table addresses
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    lda #<JetSprite
+    sta JetSpritePtr         ; lo-byte pointer for jet sprite lookup table
+    lda #>JetSprite
+    sta JetSpritePtr+1       ; hi-byte pointer for jet sprite lookup table
+
+    lda #<JetColor
+    sta JetColorPtr          ; lo-byte pointer for jet color lookup table
+    lda #>JetColor
+    sta JetColorPtr+1        ; hi-byte pointer for jet color lookup table
+
+    lda #<BomberSprite
+    sta BomberSpritePtr      ; lo-byte pointer for enemy sprite lookup table
+    lda #>BomberSprite
+    sta BomberSpritePtr+1    ; hi-byte pointer for enemy sprite lookup table
+
+    lda #<BomberColor
+    sta BomberColorPtr       ; lo-byte pointer for enemy color lookup table
+    lda #>BomberColor
+    sta BomberColorPtr+1     ; hi-byte pointer for enemy color lookup table
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Start the main display loop and frame rendering
@@ -56,7 +102,7 @@ StartFrame:
     sta VBLANK               ; turn off VBLANK
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Display the 192 visible scanlines of our main game
+;; Display the 192 visible scanlines of our main game (In groups of 2)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 GameVisibleLine:
     lda #$84
@@ -72,11 +118,42 @@ GameVisibleLine:
     lda #0
     sta PF2                  ; setting PF2 bit pattern
 
-    ldx #192                 ; X counts the number of remaining scanlines
+    ldx #96                 ; X counts the number of remaining scanline pairs
 .GameLineLoop:
-    sta WSYNC
+.AreWeInsideJetSprite:       ; check if should render sprite player0
+    txa                      ; transfer X to A
+    sec                      ; make sure carry flag is set
+    sbc JetYPos              ; subtract sprite Y coordinate
+    cmp JET_HEIGHT           ; are we inside the sprite height bounds?
+    bcc .DrawSpriteP0        ; if result < SpriteHeight, call subroutine
+    lda #0                   ; else, set lookup index to 0
+.DrawSpriteP0:
+    tay                      ; load Y so we can work with pointer
+    lda (JetSpritePtr),Y     ; load player bitmap slice of data
+    sta WSYNC                ; wait for next scanline
+    sta GRP0                 ; set graphics for player 0
+    lda (JetColorPtr),Y      ; load player color from lookup table
+    sta COLUP0               ; set color for player 0 slice
+
+.AreWeInsideBomberSprite:    ; check if should render sprite player1
+    txa                      ; transfer X to A
+    sec                      ; make sure carry flag is set
+    sbc BomberYPos           ; subtract sprite Y coordinate
+    cmp BOMBER_HEIGHT        ; are we inside the sprite height bounds?
+    bcc .DrawSpriteP1        ; if result < SpriteHeight, call subroutine
+    lda #0                   ; else, set index to 0
+.DrawSpriteP1:
+    tay
+    lda #%0000101
+    sta NUSIZ1               ; stretch player1 sprite
+    lda (BomberSpritePtr),Y  ; load player bitmap slice of data
+    sta WSYNC                ; wait for next scanline
+    sta GRP1                 ; set graphics for player 0
+    lda (BomberColorPtr),Y   ; load player color from lookup table
+    sta COLUP1               ; set color for player 0 slice
+
     dex                      ; X--
-    bne .GameLineLoop        ; repeat next main game scanline until finished
+    bne .GameLineLoop        ; repeat next main game scanline while X != 0
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Display Overscan
@@ -93,6 +170,75 @@ GameVisibleLine:
 ;; Loop back to start a brand new frame
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     jmp StartFrame           ; continue to display the next frame
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Declare ROM lookup tables
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+JetSprite:
+    .byte #%00000000         ;
+    .byte #%00010100         ;   # #
+    .byte #%01111111         ; #######
+    .byte #%00111110         ;  #####
+    .byte #%00011100         ;   ###
+    .byte #%00011100         ;   ###
+    .byte #%00001000         ;    #
+    .byte #%00001000         ;    #
+    .byte #%00001000         ;    #
+
+JetSpriteTurn:
+    .byte #%00000000         ;
+    .byte #%00001000         ;    #
+    .byte #%00111110         ;  #####
+    .byte #%00011100         ;   ###
+    .byte #%00011100         ;   ###
+    .byte #%00011100         ;   ###
+    .byte #%00001000         ;    #
+    .byte #%00001000         ;    #
+    .byte #%00001000         ;    #
+
+BomberSprite:
+    .byte #%00000000         ;
+    .byte #%00001000         ;    #
+    .byte #%00001000         ;    #
+    .byte #%00101010         ;  # # #
+    .byte #%00111110         ;  #####
+    .byte #%01111111         ; #######
+    .byte #%00101010         ;  # # #
+    .byte #%00001000         ;    #
+    .byte #%00011100         ;   ###
+
+JetColor:
+    .byte #$00
+    .byte #$FE
+    .byte #$0C
+    .byte #$0E
+    .byte #$0E
+    .byte #$04
+    .byte #$BA
+    .byte #$0E
+    .byte #$08
+
+JetColorTurn:
+    .byte #$00
+    .byte #$FE
+    .byte #$0C
+    .byte #$0E
+    .byte #$0E
+    .byte #$04
+    .byte #$0E
+    .byte #$0E
+    .byte #$08
+
+BomberColor:
+    .byte #$00
+    .byte #$32
+    .byte #$32
+    .byte #$0E
+    .byte #$40
+    .byte #$40
+    .byte #$40
+    .byte #$40
+    .byte #$40
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Complete ROM size with exactly 4KB
