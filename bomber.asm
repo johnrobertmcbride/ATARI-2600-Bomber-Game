@@ -350,9 +350,19 @@ UpdateBomberPosition:
     dec BomberYPos           ; else, decrement enemy y-position for next frame
     jmp EndPositionUpdate
 .ResetBomberPosition
-    inc Score                ; Add 1 to score before setting new bomber
-    inc Timer                ; Add 1 to timer (best approximation of "time")
     jsr GetRandomBomberPos   ; call subroutine for random bomber postion
+
+.SetScoreValues
+    sed                      ; turn on BCD (Binary Coded Decimal) mode
+    lda Score
+    clc
+    adc #1
+    sta Score                ; add 1 to score (BCD does not like INC)
+    lda Timer
+    clc
+    adc #1                   ; add 1 to timer (BCD does not like INC)
+    sta Timer
+    cld                      ; turn off BCD mode
 
 EndPositionUpdate:           ; fallback for the position update code
 
